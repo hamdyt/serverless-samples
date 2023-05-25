@@ -1,0 +1,324 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AppSync sample application to demonstrate the use of different backend integrations 222
+
+# This template builds integration between AppSync and multiple backend data sources such as DynamoDB, RDS and SQS
+# It will support CW later on
+
+Parameters: 
+ soccerTableName: 
+  Type: String
+  Default: SoccerTeamsTable
+  Description: Name of the soccer teams dynamodb table
+
+ SoccerTeamsGraphQLApiName:
+  Type: String
+  Default: SoccerGraphQLAPI
+  Description: Name of AppSync soccer teams GraphQL API
+  
+Globals:
+  Function:
+    MemorySize: 512
+    Timeout: 100
+
+Resources:
+  # Define AppSync role to access DynamoDB
+  SoccerTeamsGraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    DependsOn:
+    - AppSyncDDBExecutionRole
+    - AppSyncLoggingRole
+    Properties:
+      AuthenticationType: API_KEY
+      Name: !Ref SoccerTeamsGraphQLApiName
+      LogConfig:
+        CloudWatchLogsRoleArn:
+          Fn::GetAtt:
+          - AppSyncLoggingRole
+          - Arn
+        FieldLogLevel: ALL
+      XrayEnabled: true
+
+  GraphQLApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+     ApiId:
+      Fn::GetAtt:
+       - SoccerTeamsGraphQLApi
+       - ApiId
+  
+  AppSyncSchema:
+    Type: "AWS::AppSync::GraphQLSchema"
+    Properties:
+      ApiId: !GetAtt SoccerTeamsGraphQLApi.ApiId
+      Definition: |
+        type Mutation {
+          addTeam(
+            id: ID!
+            name: String!
+            description: String!
+            ranking: Int
+            url: String
+          ): Team!
+        }
+
+        type Team {
+          name: String!
+          description: String!
+          id: ID!
+          ranking: Int
+          url: String
+        }
+        
+        type Query {
+         allTeams(limit: Int, nextToken: String): PaginatedTeams!
+         getTeam(id: ID): Team
+        }
+        
+        type PaginatedTeams {
+         teams: [Team!]!
+         nextToken: String
+        }
+
+        schema {
+         query: Query
+         mutation: Mutation
+        }
+
+  SoccerTeamsDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      Name: SoccerDataSource
+      ApiId: !GetAtt SoccerTeamsGraphQLApi.ApiId
+      Description: "Soccer Teams Demo AppSync Data Source"
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AppSyncDDBExecutionRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref DDBSoccerTable
+        AwsRegion: !Sub ${AWS::Region}
+
+  CreateTeamsResolver:
+    Type: "AWS::AppSync::Resolver"
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt SoccerTeamsGraphQLApi.ApiId
+      TypeName: Mutation
+      FieldName: addTeam
+      DataSourceName: !GetAtt SoccerTeamsDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "PutItem",
+          "key": {
+            "id" : $util.dynamodb.toDynamoDBJson($util.autoId())
+          },
+          "attributeValues" : $util.dynamodb.toMapValuesJson($ctx.args),
+        }
+      ResponseMappingTemplate: "$utils.toJson($ctx.result)"
+  
+  getTeamsResolver:
+    Type: "AWS::AppSync::Resolver"
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt SoccerTeamsGraphQLApi.ApiId
+      TypeName: Query
+      FieldName: allTeams
+      DataSourceName: !GetAtt SoccerTeamsDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Scan",
+          "limit": $util.defaultIfNull(${ctx.args.limit},5),
+          "nextToken": $util.toJson(${ctx.args.nextToken})
+        }
+      ResponseMappingTemplate: |
+        {
+          "teams": $util.toJson($ctx.result.items),
+          "nextToken": $util.toJson(${ctx.args.nextToken})
+        }
+        
+  AppSyncDDBExecutionRole:
+    Type: AWS::IAM::Role 
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+      Policies:
+        - PolicyName: DDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource: !GetAtt DDBSoccerTable.Arn
+  
+    
+  AppSyncLoggingRole:
+   # Define AppSync logging role
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - appsync.amazonaws.com
+          Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+      
+  DDBSoccerTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: TimeToLive
+        Enabled: TRUE
+
+  AppSyncDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-dashboard"
+      DashboardBody:
+        Fn::Sub: >
+          {
+            "widgets": [
+                {
+                    "height": 6,
+                    "width": 6,
+                    "y": 1,
+                    "x": 0,
+                    "type": "metric",
+                    "properties": {
+                        "metrics": [
+                            [ "AWS/AppSync", "4XXError", "GraphQLAPIId", "hiewpsj2hvcaxmegbjze6ktune" ],
+                            [ ".", "5XXError", ".", "." ],
+                            [ ".", "Latency", ".", "." ]
+                        ],
+                        "view": "timeSeries",
+                        "stacked": false,
+                        "region": "us-west-2",
+                        "period": 300,
+                        "stat": "Minimum",
+                        "title": "AppSync-API-Widget",
+                        "annotations": {
+                            "horizontal": [
+                                {
+                                    "label": "SLA",
+                                    "value": 37
+                                }
+                            ]
+                        },
+                        "start": "-PT1H",
+                        "end": "PT0H"
+                    }
+                },
+                {
+                    "type": "metric",
+                    "x": 6,
+                    "y": 1,
+                    "width": 6,
+                    "height": 6,
+                    "properties": {
+                        "metrics": [
+                            [ "AWS/DynamoDB", "ProvisionedReadCapacityUnits", "TableName", "appsync-ddb-dev-DDBSoccerTable-1IGV54EU5LOIS" ],
+                            [ ".", "ProvisionedWriteCapacityUnits", ".", "." ]
+                        ],
+                        "view": "timeSeries",
+                        "stacked": true,
+                        "region": "us-west-2",
+                        "period": 300,
+                        "stat": "Sum"
+                    }
+                },
+                {
+                    "type": "metric",
+                    "x": 12,
+                    "y": 1,
+                    "width": 7,
+                    "height": 6,
+                    "properties": {
+                        "sparkline": true,
+                        "view": "singleValue",
+                        "metrics": [
+                            [ "AWS/DynamoDB", "ReturnedItemCount", "TableName", "appsync-ddb-prod-DDBSoccerTable-1AC3JU4C4LN2V", "Operation", "Scan" ],
+                            [ ".", "SuccessfulRequestLatency", ".", ".", ".", "." ],
+                            [ "...", "PutItem" ]
+                        ],
+                        "region": "us-west-2"
+                    }
+                },
+                {
+                    "type": "text",
+                    "x": 0,
+                    "y": 0,
+                    "width": 19,
+                    "height": 1,
+                    "properties": {
+                        "markdown": "Core Health Metrics"
+                    }
+                },
+                {
+                    "type": "text",
+                    "x": 0,
+                    "y": 7,
+                    "width": 19,
+                    "height": 1,
+                    "properties": {
+                        "markdown": "Alarms"
+                    }
+                },
+                {
+                    "type": "alarm",
+                    "x": 0,
+                    "y": 8,
+                    "width": 6,
+                    "height": 2,
+                    "properties": {
+                        "title": "AppSync API Latency",
+                        "alarms": [
+                            "arn:aws:cloudwatch:us-west-2:779683736878:alarm:AppSync-Alram"
+                        ]
+                    }
+                }
+            ]
+          }
+
+Outputs:
+  ApiUrl:
+    Description: "The GraphQL endpoint"
+    Value: !GetAtt SoccerTeamsGraphQLApi.GraphQLUrl
+  AppSyncDynamoDBRole:
+    Description: The IAM Role ARN that AWS Appsync will assume when interacting with Amazon DynamoDB.
+    Value: !GetAtt AppSyncDDBExecutionRole.Arn
+  AppSyncDynamoDBTable:
+    Description: The name of the Amazon DynamoDB table containing post data.
+    Value: !Ref DDBSoccerTable
+  DashboardURL:
+    Description: "Dashboard URL"
+    Value: !Sub "https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${AppSyncDashboard}"
+  
