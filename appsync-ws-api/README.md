@@ -12,7 +12,7 @@ The services used by this application include [AWS AppSync](https://aws.amazon.c
 
 ## Architecture
 
-![Architecture diagram](./assets/initial_architecture-ddb-sqs.jpg)
+![Architecture diagram](./assets/initial_architecture.jpg)
 
 The examples uses AWS AppSync as the front door to the client application. The client application will use API_KEY to authenticate with AppSync. In AppSync you will define persistent storage as the data source, a schema that defines the shape of the data that flows through your API and also the operations that can be performed. Finally, you will define AppSync resolvers which are functions that convert the GraphQL payload to the underlying storage/target service using [VTL](https://velocity.apache.org/engine/1.7/user-guide.html) which contains transformation and execution logic.
 
