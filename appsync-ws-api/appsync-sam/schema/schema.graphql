@@ -1,0 +1,20 @@
+﻿schema {
+  query: Query
+  mutation: Mutation
+}
+
+type Mutation {
+  addTeam(Name: String!, description: String!, id: ID!, ranking: Int, url: String): Team!
+}
+
+type Team {
+  Name: String!
+  description: String!
+  id: ID!
+  ranking: Int
+  url: String
+}
+
+type Query {
+  getTeams(id: ID): Team
+}
