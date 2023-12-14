@@ -1,36 +1,26 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AppSync sample application to demonstrate the use of different backend integrations 222
+Description: AppSync sample application to demonstrate the use of different backend integrations
 
-# This template builds integration between AppSync and multiple backend data sources such as DynamoDB, RDS and SQS
-# It will support CW later on
-
-Parameters: 
- soccerTableName: 
-  Type: String
-  Default: SoccerTeamsTable
-  Description: Name of the soccer teams dynamodb table
-
- SoccerTeamsGraphQLApiName:
-  Type: String
-  Default: SoccerGraphQLAPI
-  Description: Name of AppSync soccer teams GraphQL API
-  
 Globals:
   Function:
-    MemorySize: 512
+    Runtime: python3.9
+    MemorySize: 128
     Timeout: 100
+    Tracing: Active
+  Api:
+    TracingEnabled: true
 
 Resources:
-  # Define AppSync role to access DynamoDB
-  SoccerTeamsGraphQLApi:
+  # Define AppSync GraphQL API
+  GraphQLApi:
     Type: AWS::AppSync::GraphQLApi
     DependsOn:
     - AppSyncDDBExecutionRole
     - AppSyncLoggingRole
     Properties:
       AuthenticationType: API_KEY
-      Name: !Ref SoccerTeamsGraphQLApiName
+      Name: !Sub "SoccerGraphQLAPI-${AWS::StackName}"
       LogConfig:
         CloudWatchLogsRoleArn:
           Fn::GetAtt:
@@ -38,19 +28,22 @@ Resources:
           - Arn
         FieldLogLevel: ALL
       XrayEnabled: true
+      Tags:
+        - Key: "Stack" 
+          Value: !Sub "${AWS::StackName}"
 
   GraphQLApiKey:
     Type: AWS::AppSync::ApiKey
     Properties:
      ApiId:
       Fn::GetAtt:
-       - SoccerTeamsGraphQLApi
+       - GraphQLApi
        - ApiId
   
   AppSyncSchema:
     Type: "AWS::AppSync::GraphQLSchema"
     Properties:
-      ApiId: !GetAtt SoccerTeamsGraphQLApi.ApiId
+      ApiId: !GetAtt GraphQLApi.ApiId
       Definition: |
         type Mutation {
           addTeam(
@@ -89,7 +82,7 @@ Resources:
     Type: "AWS::AppSync::DataSource"
     Properties:
       Name: SoccerDataSource
-      ApiId: !GetAtt SoccerTeamsGraphQLApi.ApiId
+      ApiId: !GetAtt GraphQLApi.ApiId
       Description: "Soccer Teams Demo AppSync Data Source"
       Type: AMAZON_DYNAMODB
       ServiceRoleArn: !GetAtt AppSyncDDBExecutionRole.Arn
@@ -101,7 +94,7 @@ Resources:
     Type: "AWS::AppSync::Resolver"
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt SoccerTeamsGraphQLApi.ApiId
+      ApiId: !GetAtt GraphQLApi.ApiId
       TypeName: Mutation
       FieldName: addTeam
       DataSourceName: !GetAtt SoccerTeamsDataSource.Name
@@ -120,7 +113,7 @@ Resources:
     Type: "AWS::AppSync::Resolver"
     DependsOn: AppSyncSchema
     Properties:
-      ApiId: !GetAtt SoccerTeamsGraphQLApi.ApiId
+      ApiId: !GetAtt GraphQLApi.ApiId
       TypeName: Query
       FieldName: allTeams
       DataSourceName: !GetAtt SoccerTeamsDataSource.Name
@@ -311,7 +304,7 @@ Resources:
 Outputs:
   ApiUrl:
     Description: "The GraphQL endpoint"
-    Value: !GetAtt SoccerTeamsGraphQLApi.GraphQLUrl
+    Value: !GetAtt GraphQLApi.GraphQLUrl
   AppSyncDynamoDBRole:
     Description: The IAM Role ARN that AWS Appsync will assume when interacting with Amazon DynamoDB.
     Value: !GetAtt AppSyncDDBExecutionRole.Arn

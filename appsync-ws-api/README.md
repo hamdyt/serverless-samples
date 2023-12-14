@@ -1,7 +1,6 @@
 # appsync-websocket-api
 
-These [AWS AppSync](https://aws.amazon.com/appsync/) examples demonstrate end-to-end implementations of a simple application using serverless approach that showcase AWS AppSync built in functionality to connect to multiple data sources using a single GraphQL API. The examples include two implementations of the same application using a variety of development platform and infrastructure as a code approaches. The examples dive deeper to include: 123
-
+These [AWS AppSync](https://aws.amazon.com/appsync/) examples demonstrate end-to-end implementations of a simple application using serverless approach that showcase AWS AppSync built in functionality to connect to multiple data sources using a single GraphQL API. The examples include two implementations of the same application using a variety of development platform and infrastructure as a code approaches. The examples dive deeper to include:
 
 - Automated deployment using CI/CD pipelines.
 - Automated unit and integration testing.
