@@ -6,7 +6,7 @@ Globals:
   Function:
     Runtime: python3.9
     MemorySize: 128
-    Timeout: 100
+    Timeout: 20
     Tracing: Active
   Api:
     TracingEnabled: true
